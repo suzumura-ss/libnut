@@ -25,7 +25,7 @@ nututils/nutmerge: $(NUTMERGE_OBJS) libnut/libnut.a
 
 $(NUTUTILS_PROGS): CFLAGS += -Ilibnut
 
-install: install-libnut install-nututils
+install: install-libnut install-libnut-shared install-nututils
 
 install-libnut: libnut install-libnut-headers
 	install -d $(prefix)/lib
