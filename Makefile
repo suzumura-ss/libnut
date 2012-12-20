@@ -6,7 +6,7 @@ NUTMERGE_OBJS = nututils/nutmerge.o nututils/demux_avi.o nututils/demux_ogg.o nu
 
 all: libnut nututils
 
-libnut: libnut/libnut.a
+libnut: libnut/libnut.a libnut/libnut.so
 
 libnut/libnut.a: $(LIBNUT_OBJS)
 	rm -f $@
