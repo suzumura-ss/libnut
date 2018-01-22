@@ -7,7 +7,7 @@
 #include "libnut.h"
 #include "priv.h"
 
-static int stream_write(void * priv, size_t len, const uint8_t * buf) {
+static int64_t stream_write(void * priv, size_t len, const uint8_t * buf) {
     return fwrite(buf, 1, len, priv);
 }
 
@@ -17,20 +17,19 @@ static void flush_buf(output_buffer_tt * bc) {
     bc->buf_ptr = bc->buf;
 }
 
-static void ready_write_buf(output_buffer_tt * bc, int amount) {
+static void ready_write_buf(output_buffer_tt * bc, int64_t amount) {
     if (bc->write_len - (bc->buf_ptr - bc->buf) > amount) return;
-
-        if (bc->is_mem) {
-        int tmp = bc->buf_ptr - bc->buf;
+    if (bc->is_mem) {
+        int64_t tmp = bc->buf_ptr - bc->buf;
         bc->write_len = tmp + amount + PREALLOC_SIZE;
-        bc->buf = bc->alloc->realloc(bc->buf, bc->write_len);
+        bc->buf = bc->alloc->realloc(bc->buf, (size_t)bc->write_len);
         bc->buf_ptr = bc->buf + tmp;
     } else {
         flush_buf(bc);
         if (bc->write_len < amount) {
             bc->alloc->free(bc->buf);
             bc->write_len = amount + PREALLOC_SIZE;
-            bc->buf_ptr = bc->buf = bc->alloc->malloc(bc->write_len);
+            bc->buf_ptr = bc->buf = bc->alloc->malloc((size_t)bc->write_len);
         }
     }
 }
@@ -41,7 +40,7 @@ static output_buffer_tt * new_mem_buffer(nut_alloc_tt * alloc) {
     bc->write_len = PREALLOC_SIZE;
     bc->is_mem = 1;
     bc->file_pos = 0;
-    bc->buf_ptr = bc->buf = alloc->malloc(bc->write_len);
+    bc->buf_ptr = bc->buf = alloc->malloc((size_t)bc->write_len);
     bc->osc.write = NULL;
     return bc;
 }
@@ -67,25 +66,25 @@ static output_buffer_tt * clear_buffer(output_buffer_tt * bc) {
     return bc;
 }
 
-static void put_bytes(output_buffer_tt * bc, int count, uint64_t val) {
+static void put_bytes(output_buffer_tt * bc, int64_t count, uint64_t val) {
     ready_write_buf(bc, count);
     for(count--; count >= 0; count--){
-        *(bc->buf_ptr++) = val >> (8 * count);
+        *(bc->buf_ptr++) = (uint8_t)(val >> (8 * count));
     }
 }
 
-static int v_len(uint64_t val) {
-    int i;
+static int64_t v_len(uint64_t val) {
+    int64_t i;
     val &= 0x7FFFFFFFFFFFFFFFULL;
     for(i=1; val>>(i*7); i++);
     return i;
 }
 
 static void put_v(output_buffer_tt * bc, uint64_t val) {
-    int i = v_len(val);
+    int64_t i = v_len(val);
     ready_write_buf(bc, i);
     for(i = (i-1)*7; i; i-=7) {
-        *(bc->buf_ptr++) = 0x80 | (val>>i);
+        *(bc->buf_ptr++) = (uint8_t)(0x80 | (val>>i));
     }
     *(bc->buf_ptr++)= val & 0x7F;
 }
@@ -95,26 +94,26 @@ static void put_s(output_buffer_tt * bc, int64_t val) {
     else        put_v(bc,  2*val-1);
 }
 
-static void put_data(output_buffer_tt * bc, int len, const void * data) {
+static void put_data(output_buffer_tt * bc, int64_t len, const void * data) {
     if (!len) return;
     assert(data);
     if (bc->write_len - (bc->buf_ptr - bc->buf) > len || bc->is_mem) {
         ready_write_buf(bc, len);
-        memcpy(bc->buf_ptr, data, len);
+        memcpy(bc->buf_ptr, data, (size_t)len);
         bc->buf_ptr += len;
     } else {
         flush_buf(bc);
-        bc->file_pos += bc->osc.write(bc->osc.priv, len, data);
+        bc->file_pos += bc->osc.write(bc->osc.priv, (size_t)len, data);
     }
 }
 
-static void put_vb(output_buffer_tt * bc, int len, const void * data) {
+static void put_vb(output_buffer_tt * bc, int64_t len, const void * data) {
     put_v(bc, len);
     put_data(bc, len, data);
 }
 
-static void put_header(output_buffer_tt * bc, output_buffer_tt * in, output_buffer_tt * tmp, uint64_t startcode, int index_ptr) {
-    int forward_ptr;
+static void put_header(output_buffer_tt * bc, output_buffer_tt * in, output_buffer_tt * tmp, uint64_t startcode, int64_t index_ptr) {
+    int64_t forward_ptr;
     assert(in->is_mem);
     assert(tmp->is_mem);
     clear_buffer(tmp);
@@ -134,13 +133,13 @@ static void put_header(output_buffer_tt * bc, output_buffer_tt * in, output_buff
     put_bytes(in, 4, crc32(in->buf, bctello(in)));
 
     put_data(bc, bctello(in), in->buf);
-    if (startcode != SYNCPOINT_STARTCODE) debug_msg("header/index size: %d\n", (int)(bctello(tmp) + bctello(in)));
+    if (startcode != SYNCPOINT_STARTCODE) debug_msg("header/index size: %d\n", (int64_t)(bctello(tmp) + bctello(in)));
 }
 
 static void put_main_header(nut_context_tt * nut) {
     output_buffer_tt * tmp = clear_buffer(nut->tmp_buffer);
-    int i;
-    int flag, fields, timestamp = 0, mul = 1, stream = 0, size, count;
+    int64_t i;
+    int64_t flag, fields, timestamp = 0, mul = 1, stream = 0, size, count;
 
     put_v(tmp, NUT_VERSION);
     put_v(tmp, nut->stream_count);
@@ -187,7 +186,7 @@ static void put_main_header(nut_context_tt * nut) {
     put_header(nut->o, tmp, nut->tmp_buffer2, MAIN_STARTCODE, 0);
 }
 
-static void put_stream_header(nut_context_tt * nut, int id) {
+static void put_stream_header(nut_context_tt * nut, int64_t id) {
     output_buffer_tt * tmp = clear_buffer(nut->tmp_buffer);
     stream_context_tt * sc = &nut->sc[id];
 
@@ -221,7 +220,7 @@ static void put_stream_header(nut_context_tt * nut, int id) {
 
 static void put_info(nut_context_tt * nut, const nut_info_packet_tt * info) {
     output_buffer_tt * tmp = clear_buffer(nut->tmp_buffer);
-    int i;
+    int64_t i;
 
     put_v(tmp, info->stream_id_plus1);
     put_s(tmp, info->chapter_id);
@@ -239,7 +238,7 @@ static void put_info(nut_context_tt * nut, const nut_info_packet_tt * info) {
             put_s(tmp, -3);
             put_s(tmp, field->val);
         } else if (!strcmp(field->type, "t")) {
-            int j;
+            int64_t j;
             for (j = 0; j < nut->timebase_count; j++) if (compare_ts(1, field->tb, 1, nut->tb[j]) == 0) break;
             put_s(tmp, -4);
             put_v(tmp, field->val * nut->timebase_count + j);
@@ -261,7 +260,7 @@ static void put_info(nut_context_tt * nut, const nut_info_packet_tt * info) {
 }
 
 static void put_headers(nut_context_tt * nut) {
-    int i;
+    int64_t i;
     nut->last_headers = bctello(nut->o);
     nut->headers_written++;
 
@@ -272,11 +271,11 @@ static void put_headers(nut_context_tt * nut) {
 
 static void put_syncpoint(nut_context_tt * nut) {
     output_buffer_tt * tmp = clear_buffer(nut->tmp_buffer);
-    int i;
+    int64_t i;
     uint64_t pts = 0;
-    int timebase = 0;
-    int back_ptr = 0;
-    int keys[nut->stream_count];
+    int64_t timebase = 0;
+    int64_t back_ptr = 0;
+    int64_t keys[MAX_STREAM_COUNT/*nut->stream_count*/];
     syncpoint_list_tt * s = &nut->syncpoints;
 
     nut->last_syncpoint = bctello(nut->o);
@@ -290,9 +289,9 @@ static void put_syncpoint(nut_context_tt * nut) {
 
     if (s->alloc_len <= s->len) {
         s->alloc_len += PREALLOC_SIZE;
-        s->s = nut->alloc->realloc(s->s, s->alloc_len * sizeof(syncpoint_tt));
-        s->pts = nut->alloc->realloc(s->pts, s->alloc_len * nut->stream_count * sizeof(uint64_t));
-        s->eor = nut->alloc->realloc(s->eor, s->alloc_len * nut->stream_count * sizeof(uint64_t));
+        s->s = nut->alloc->realloc(s->s, (size_t)(s->alloc_len * sizeof(syncpoint_tt)));
+        s->pts = nut->alloc->realloc(s->pts, (size_t)(s->alloc_len * nut->stream_count * sizeof(uint64_t)));
+        s->eor = nut->alloc->realloc(s->eor, (size_t)(s->alloc_len * nut->stream_count * sizeof(uint64_t)));
     }
 
     for (i = 0; i < nut->stream_count; i++) {
@@ -304,8 +303,8 @@ static void put_syncpoint(nut_context_tt * nut) {
 
     for (i = 0; i < nut->stream_count; i++) keys[i] = !!nut->sc[i].eor;
     for (i = s->len; --i; ) {
-        int j;
-        int n = 1;
+        int64_t j;
+        int64_t n = 1;
         for (j = 0; j < nut->stream_count; j++) {
             if (keys[j]) continue;
             if (!s->pts[i * nut->stream_count + j]) continue;
@@ -317,9 +316,9 @@ static void put_syncpoint(nut_context_tt * nut) {
     back_ptr = (nut->last_syncpoint - s->s[i].pos) / 16;
     if (!nut->mopts.write_index) { // clear some syncpoint cache if possible
         s->len -= i;
-        memmove(s->s, s->s + i, s->len * sizeof(syncpoint_tt));
-        memmove(s->pts, s->pts + i * nut->stream_count, s->len * nut->stream_count * sizeof(uint64_t));
-        memmove(s->eor, s->eor + i * nut->stream_count, s->len * nut->stream_count * sizeof(uint64_t));
+        memmove(s->s, s->s + i, (size_t)(s->len * sizeof(syncpoint_tt)));
+        memmove(s->pts, s->pts + i * nut->stream_count, (size_t)(s->len * nut->stream_count * sizeof(uint64_t)));
+        memmove(s->eor, s->eor + i * nut->stream_count, (size_t)(s->len * nut->stream_count * sizeof(uint64_t)));
     }
 
     for (i = 0; i < nut->stream_count; i++) {
@@ -339,9 +338,9 @@ static void put_syncpoint(nut_context_tt * nut) {
 static void put_index(nut_context_tt * nut) {
     output_buffer_tt * tmp = clear_buffer(nut->tmp_buffer);
     syncpoint_list_tt * s = &nut->syncpoints;
-    int i;
+    int64_t i;
     uint64_t max_pts = 0;
-    int timebase = 0;
+    int64_t timebase = 0;
 
     for (i = 0; i < nut->stream_count; i++) {
         if (compare_ts(nut->sc[i].sh.max_pts, TO_TB(i), max_pts, nut->tb[timebase]) > 0) {
@@ -353,27 +352,27 @@ static void put_index(nut_context_tt * nut) {
 
     put_v(tmp, s->len);
     for (i = 0; i < s->len; i++) {
-        off_t pos = s->s[i].pos / 16;
-        off_t last_pos = i ? s->s[i-1].pos / 16 : 0;
+        int64_t pos = s->s[i].pos / 16;
+        int64_t last_pos = i ? s->s[i-1].pos / 16 : 0;
         put_v(tmp, pos - last_pos);
     }
 
     for (i = 0; i < nut->stream_count; i++) {
         uint64_t a, last = 0; // all of pts[] array is off by one. using 0 for last pts is equivalent to -1 in spec.
-        int j;
+        int64_t j;
         for (j = 0; j < s->len; ) {
-            int k;
+            int64_t k;
             a = 0;
             for (k = 0; k < 5 && j+k < s->len; k++) a |= !!s->pts[(j + k) * nut->stream_count + i] << k;
             if (a == 0 || a == ((1 << k) - 1)) {
-                int flag = a & 2;
+                int64_t flag = a & 2;
                 for (k = 0; j+k < s->len; k++) if (!s->pts[(j+k) * nut->stream_count + i] != !flag) break;
                 put_v(tmp, k << 2 | flag | 1);
                 if (j+k < s->len) k++;
             } else {
                 for (; k+7 < 62 && j+k < s->len; ) {
                     uint64_t b = 0;
-                    int tmp2;
+                    int64_t tmp2;
                     for (tmp2 = 0; tmp2 < 7 && j+k+tmp2 < s->len; tmp2++) {
                         b |= !!s->pts[(j + k + tmp2) * nut->stream_count + i] << tmp2;
                     }
@@ -403,23 +402,23 @@ static void put_index(nut_context_tt * nut) {
     put_header(nut->o, tmp, nut->tmp_buffer2, INDEX_STARTCODE, 1);
 }
 
-static int frame_header(nut_context_tt * nut, output_buffer_tt * tmp, const nut_packet_tt * fd) {
+static int64_t frame_header(nut_context_tt * nut, output_buffer_tt * tmp, const nut_packet_tt * fd) {
     stream_context_tt * sc = &nut->sc[fd->stream];
-    int i, ftnum = -1, size = 0, coded_pts, coded_flags = 0, msb_pts = (1 << sc->msb_pts_shift);
-    int checksum = 0, pts_delta = (int64_t)fd->pts - (int64_t)sc->last_pts;
+    int64_t i, ftnum = -1, size = 0, coded_pts, coded_flags = 0, msb_pts = (1LL << sc->msb_pts_shift);
+    int64_t checksum = 0, pts_delta = (int64_t)fd->pts - (int64_t)sc->last_pts;
 
     if (ABS(pts_delta) < (msb_pts/2) - 1) coded_pts = fd->pts & (msb_pts - 1);
     else coded_pts = fd->pts + msb_pts;
 
     if (fd->len > 2*nut->max_distance) checksum = 1;
     if (ABS(pts_delta) > sc->max_pts_distance) {
-        debug_msg("%d > %d || %d - %d > %d   \n", fd->len, 2*nut->max_distance, (int)fd->pts, (int)sc->last_pts, sc->max_pts_distance);
+        debug_msg("%d > %d || %d - %d > %d   \n", fd->len, 2*nut->max_distance, (int64_t)fd->pts, (int64_t)sc->last_pts, sc->max_pts_distance);
         checksum = 1;
     }
 
     for (i = 0; i < 256; i++) {
-        int len = 1; // frame code
-        int flags = nut->ft[i].flags;
+        int64_t len = 1; // frame code
+        int64_t flags = nut->ft[i].flags;
         if (flags & FLAG_INVALID) continue;
         if (flags & FLAG_CODED) {
             flags = fd->flags & NUT_API_FLAGS;
@@ -455,11 +454,11 @@ static int frame_header(nut_context_tt * nut, output_buffer_tt * tmp, const nut_
     return size;
 }
 
-static int add_timebase(nut_context_tt * nut, nut_timebase_tt tb) {
-    int i;
+static int64_t add_timebase(nut_context_tt * nut, nut_timebase_tt tb) {
+    int64_t i;
     for (i = 0; i < nut->timebase_count; i++) if (compare_ts(1, nut->tb[i], 1, tb) == 0) break;
     if (i == nut->timebase_count) {
-        nut->tb = nut->alloc->realloc(nut->tb, sizeof(nut_timebase_tt) * ++nut->timebase_count);
+        nut->tb = nut->alloc->realloc(nut->tb, (size_t)(sizeof(nut_timebase_tt) * ++nut->timebase_count));
         nut->tb[i] = tb;
     }
     return i;
@@ -468,10 +467,10 @@ static int add_timebase(nut_context_tt * nut, nut_timebase_tt tb) {
 static void check_header_repetition(nut_context_tt * nut) {
     if (nut->mopts.realtime_stream) return;
     if (bctello(nut->o) >= (1 << 23)) {
-        int i; // ### magic value for header repetition
-        for (i = 24; bctello(nut->o) >= (1 << i); i++);
+        int64_t i; // ### magic value for header repetition
+        for (i = 24; bctello(nut->o) >= (1LL << i); i++);
         i--;
-        if (nut->last_headers < (1 << i)) {
+        if (nut->last_headers < (1LL << i)) {
             put_headers(nut);
         }
     }
@@ -480,7 +479,7 @@ static void check_header_repetition(nut_context_tt * nut) {
 void nut_write_frame(nut_context_tt * nut, const nut_packet_tt * fd, const uint8_t * buf) {
     stream_context_tt * sc = &nut->sc[fd->stream];
     output_buffer_tt * tmp;
-    int i;
+    int64_t i;
 
     check_header_repetition(nut);
     // distance syncpoints
@@ -495,7 +494,7 @@ void nut_write_frame(nut_context_tt * nut, const nut_packet_tt * fd, const uint8
     put_data(nut->o, bctello(tmp), tmp->buf);
     put_data(nut->o, fd->len, buf);
 
-        for (i = 0; i < nut->stream_count; i++) {
+    for (i = 0; i < nut->stream_count; i++) {
         if (nut->sc[i].last_dts == -1) continue;
         if (compare_ts(fd->pts, TO_TB(fd->stream), nut->sc[i].last_dts, TO_TB(i)) < 0)
             debug_msg("%lld %d (%f) %lld %d (%f) \n",
@@ -526,7 +525,7 @@ void nut_write_info(nut_context_tt * nut, const nut_info_packet_tt * info) {
 nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_stream_header_tt s[], const nut_info_packet_tt info[]) {
     nut_context_tt * nut;
     nut_frame_table_input_tt * fti = mopts->fti, mfti[256];
-    int i, n;
+    int64_t i, n;
     // TODO check that all input is valid
 
     if (mopts->alloc.malloc) nut = mopts->alloc.malloc(sizeof(nut_context_tt));
@@ -558,7 +557,7 @@ nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_strea
     }
     debug_msg("/""/ { %4s, %3s, %6s, %3s, %4s, %5s },\n", "flag", "pts", "stream", "mul", "size", "count");
     for (n=i=0; i < 256; n++) {
-        int j;
+        int64_t j;
         assert(fti[n].flag != -1);
 
         debug_msg("   { %4d, %3d, %6d, %3d, %4d, %5d },\n", fti[n].flag, fti[n].pts, fti[n].stream, fti[n].mul, fti[n].size, fti[n].count);
@@ -568,11 +567,11 @@ nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_strea
                 j--;
                 continue;
             }
-            nut->ft[i].flags     = fti[n].flag;
-            nut->ft[i].pts_delta = fti[n].pts;
-            nut->ft[i].mul       = fti[n].mul;
-            nut->ft[i].stream    = fti[n].stream;
-            nut->ft[i].lsb       = fti[n].size + j;
+            nut->ft[i].flags     = (uint16_t)fti[n].flag;
+            nut->ft[i].pts_delta = (int16_t)fti[n].pts;
+            nut->ft[i].mul       = (uint16_t)fti[n].mul;
+            nut->ft[i].stream    = (uint8_t)fti[n].stream;
+            nut->ft[i].lsb       = (uint16_t)(fti[n].size + j);
         }
     }
     debug_msg("   { %4d, %3d, %6d, %3d, %4d, %5d },\n", fti[n].flag, fti[n].pts, fti[n].stream, fti[n].mul, fti[n].size, fti[n].count);
@@ -590,12 +589,12 @@ nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_strea
 
     for (nut->stream_count = 0; s[nut->stream_count].type >= 0; nut->stream_count++);
 
-    nut->sc = nut->alloc->malloc(sizeof(stream_context_tt) * nut->stream_count);
+    nut->sc = nut->alloc->malloc((size_t)(sizeof(stream_context_tt) * nut->stream_count));
     nut->tb = NULL;
     nut->timebase_count = 0;
 
     for (i = 0; i < nut->stream_count; i++) {
-        int j;
+        int64_t j;
         nut->sc[i].last_key = 0;
         nut->sc[i].last_pts = 0;
         nut->sc[i].last_dts = -1;
@@ -605,18 +604,18 @@ nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_strea
         nut->sc[i].sh = s[i];
         nut->sc[i].sh.max_pts = 0;
 
-        nut->sc[i].sh.fourcc = nut->alloc->malloc(s[i].fourcc_len);
-        memcpy(nut->sc[i].sh.fourcc, s[i].fourcc, s[i].fourcc_len);
+        nut->sc[i].sh.fourcc = nut->alloc->malloc((size_t)s[i].fourcc_len);
+        memcpy(nut->sc[i].sh.fourcc, s[i].fourcc, (size_t)s[i].fourcc_len);
 
-        nut->sc[i].sh.codec_specific = nut->alloc->malloc(s[i].codec_specific_len);
-        memcpy(nut->sc[i].sh.codec_specific, s[i].codec_specific, s[i].codec_specific_len);
+        nut->sc[i].sh.codec_specific = nut->alloc->malloc((size_t)s[i].codec_specific_len);
+        memcpy(nut->sc[i].sh.codec_specific, s[i].codec_specific, (size_t)s[i].codec_specific_len);
 
-        nut->sc[i].pts_cache = nut->alloc->malloc(nut->sc[i].sh.decode_delay * sizeof(int64_t));
+        nut->sc[i].pts_cache = nut->alloc->malloc((size_t)(nut->sc[i].sh.decode_delay * sizeof(int64_t)));
 
         nut->sc[i].timebase_id = add_timebase(nut, s[i].time_base);
 
         // reorder.c
-        nut->sc[i].reorder_pts_cache = nut->alloc->malloc(nut->sc[i].sh.decode_delay * sizeof(int64_t));
+        nut->sc[i].reorder_pts_cache = nut->alloc->malloc((size_t)(nut->sc[i].sh.decode_delay * sizeof(int64_t)));
         for (j = 0; j < nut->sc[i].sh.decode_delay; j++) nut->sc[i].reorder_pts_cache[j] = nut->sc[i].pts_cache[j] = -1;
         nut->sc[i].next_pts = 0;
         nut->sc[i].packets = NULL;
@@ -631,18 +630,18 @@ nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_strea
     if (info) {
         for (nut->info_count = 0; info[nut->info_count].count >= 0; nut->info_count++);
 
-        nut->info = nut->alloc->malloc(sizeof(nut_info_packet_tt) * nut->info_count);
+        nut->info = nut->alloc->malloc((size_t)(sizeof(nut_info_packet_tt) * nut->info_count));
 
         for (i = 0; i < nut->info_count; i++) {
-            int j;
+            int64_t j;
             nut->info[i] = info[i];
-            nut->info[i].fields = nut->alloc->malloc(sizeof(nut_info_field_tt) * info[i].count);
+            nut->info[i].fields = nut->alloc->malloc((size_t)(sizeof(nut_info_field_tt) * info[i].count));
             add_timebase(nut, nut->info[i].chapter_tb);
             for (j = 0; j < info[i].count; j++) {
                 nut->info[i].fields[j] = info[i].fields[j];
                 if (info[i].fields[j].data) {
-                    nut->info[i].fields[j].data = nut->alloc->malloc(info[i].fields[j].val);
-                    memcpy(nut->info[i].fields[j].data, info[i].fields[j].data, info[i].fields[j].val);
+                    nut->info[i].fields[j].data = nut->alloc->malloc((size_t)info[i].fields[j].val);
+                    memcpy(nut->info[i].fields[j].data, info[i].fields[j].data, (size_t)info[i].fields[j].val);
                 }
                 if (!strcmp(nut->info[i].fields[j].type, "t")) add_timebase(nut, nut->info[i].fields[j].tb);
             }
@@ -653,7 +652,7 @@ nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_strea
     }
 
     for (i = 0; i < nut->timebase_count; i++) {
-        int t = gcd(nut->tb[i].num, nut->tb[i].den);
+        int64_t t = gcd(nut->tb[i].num, nut->tb[i].den);
         nut->tb[i].num /= t;
         nut->tb[i].den /= t;
     }
@@ -668,8 +667,8 @@ nut_context_tt * nut_muxer_init(const nut_muxer_opts_tt * mopts, const nut_strea
 }
 
 void nut_muxer_uninit(nut_context_tt * nut) {
-    int i;
-    int total = 0;
+    int64_t i;
+    int64_t total = 0;
     if (!nut) return;
 
     if (!nut->mopts.realtime_stream) {
@@ -699,7 +698,7 @@ void nut_muxer_uninit(nut_context_tt * nut) {
     nut->alloc->free(nut->tb);
 
     for (i = 0; i < nut->info_count; i++) {
-        int j;
+        int64_t j;
         for (j = 0; j < nut->info[i].count; j++) nut->alloc->free(nut->info[i].fields[j].data);
         nut->alloc->free(nut->info[i].fields);
     }
@@ -714,7 +713,7 @@ void nut_muxer_uninit(nut_context_tt * nut) {
     free_buffer(nut->tmp_buffer);
     free_buffer(nut->tmp_buffer2);
     debug_msg("TOTAL: %d bytes data, %d bytes overhead, %.2lf%% overhead\n", total,
-        (int)bctello(nut->o) - total, (double)(bctello(nut->o) - total) / total*100);
+        (int64_t)bctello(nut->o) - total, (double)(bctello(nut->o) - total) / total*100);
     free_buffer(nut->o); // flushes file
     nut->alloc->free(nut);
 }

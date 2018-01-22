@@ -7,8 +7,8 @@
 #include "libnut.h"
 #include "priv.h"
 
-static void shift_frames(nut_context_tt * nut, stream_context_tt * s, int amount) {
-    int i;
+static void shift_frames(nut_context_tt * nut, stream_context_tt * s, int64_t amount) {
+    int64_t i;
     assert(amount <= s->num_packets);
     for (i = 0; i < amount; i++) {
         nut_write_frame(nut, &s->packets[i].p, s->packets[i].buf);
@@ -17,12 +17,12 @@ static void shift_frames(nut_context_tt * nut, stream_context_tt * s, int amount
     if (s->next_pts != -2) s->next_pts = s->packets[i - 1].p.next_pts;
     s->num_packets -= amount;
 
-    memmove(s->packets, s->packets + amount, s->num_packets * sizeof(reorder_packet_tt));
-    s->packets = nut->alloc->realloc(s->packets, s->num_packets * sizeof(reorder_packet_tt));
+    memmove(s->packets, s->packets + amount, (size_t)(s->num_packets * sizeof(reorder_packet_tt)));
+    s->packets = nut->alloc->realloc(s->packets, (size_t)(s->num_packets * sizeof(reorder_packet_tt)));
 }
 
 static void flushcheck_frames(nut_context_tt * nut) {
-    int change, i;
+    int64_t change, i;
     for (i = 0; i < nut->stream_count; i++) {
         // check if any streams are missing essential info
         if (!nut->sc[i].num_packets && !nut->sc[i].next_pts) return;
@@ -30,7 +30,7 @@ static void flushcheck_frames(nut_context_tt * nut) {
     do {
         change = 0;
         for (i = 0; i < nut->stream_count; i++) {
-            int j;
+            int64_t j;
             int64_t min = -1;
             if (!nut->sc[i].num_packets) continue; // no packets pending in this stream
             for (j = 0; j < nut->stream_count; j++) {
@@ -59,7 +59,7 @@ static void flushcheck_frames(nut_context_tt * nut) {
 }
 
 void nut_muxer_uninit_reorder(nut_context_tt * nut) {
-    int i;
+    int64_t i;
     if (!nut) return;
 
     for (i = 0; i < nut->stream_count; i++) nut->sc[i].next_pts = -2;
@@ -81,12 +81,12 @@ void nut_write_frame_reorder(nut_context_tt * nut, const nut_packet_tt * p, cons
     }
 
     s->num_packets++;
-    s->packets = nut->alloc->realloc(s->packets, s->num_packets * sizeof(reorder_packet_tt));
+    s->packets = nut->alloc->realloc(s->packets, (size_t)(s->num_packets * sizeof(reorder_packet_tt)));
     s->packets[s->num_packets - 1].p = *p;
     s->packets[s->num_packets - 1].dts = get_dts(s->sh.decode_delay, s->reorder_pts_cache, p->pts);
 
-    s->packets[s->num_packets - 1].buf = nut->alloc->malloc(p->len); // FIXME
-    memcpy(s->packets[s->num_packets - 1].buf, buf, p->len);
+    s->packets[s->num_packets - 1].buf = nut->alloc->malloc((size_t)p->len); // FIXME
+    memcpy(s->packets[s->num_packets - 1].buf, buf, (size_t)p->len);
 
     flushcheck_frames(nut);
 }

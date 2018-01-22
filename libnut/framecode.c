@@ -9,22 +9,22 @@
 
 typedef nut_frame_table_input_tt fti_tt; // just a shortcut
 
-static int count_streams(const nut_stream_header_tt * s) {
-    int i;
+static int64_t count_streams(const nut_stream_header_tt * s) {
+    int64_t i;
     for (i = 0; s[i].type != -1; i++);
     return i;
 }
 
 void nut_framecode_generate(const nut_stream_header_tt s[], nut_frame_table_input_tt fti[256]) {
-    int stream_count = count_streams(s);
-    int i, n = 0, m = 0, tot_con = 0;
+    int64_t stream_count = count_streams(s);
+    int64_t i, n = 0, m = 0, tot_con = 0;
     enum {
         e_consume_none = 0,
         e_consume_mpeg4,
         e_consume_h264,
         e_consume_video,
         e_consume_vorbis,
-    } consume[stream_count];
+    } consume[MAX_STREAM_COUNT/*stream_count*/];
 
     for (i = 0; i < stream_count; i++) consume[i] = e_consume_none;
 
@@ -55,7 +55,7 @@ void nut_framecode_generate(const nut_stream_header_tt s[], nut_frame_table_inpu
             fti[n++] = (fti_tt){NUT_FLAG_KEY|               FLAG_SIZE_MSB,    1,      i,   1,    0,     1 };
             fti[n++] = (fti_tt){NUT_FLAG_KEY|FLAG_CODED_PTS|FLAG_SIZE_MSB,    0,      i,   1,    0,     1 };
             if (s[i].fourcc_len == 4 && !strncmp((char*)s[i].fourcc, "mp3 ", 4)) {
-                int j, a[] = {288,336,384,480,576,672,768,960};
+                int64_t j, a[] = {288,336,384,480,576,672,768,960};
                 for (j = 0; j < sizeof a/sizeof*a; j++)
                     fti[n++] = (fti_tt){             NUT_FLAG_KEY,    1,   i, a[j]+1, a[j],     1 };
                 fti[n++] = (fti_tt){       NUT_FLAG_KEY|FLAG_SIZE_MSB,    1,      i,   4,    0,     1 };
@@ -85,24 +85,24 @@ void nut_framecode_generate(const nut_stream_header_tt s[], nut_frame_table_inpu
 
     if (tot_con) tot_con = (254 - (n+m))/tot_con; // 256 - 'N' - 0xFF invalid
     if (tot_con) for (i = 0; i < stream_count; i++) {
-        int al = tot_con;
+        int64_t al = tot_con;
         switch (consume[i]) {
         case e_consume_none:
             break;
         case e_consume_mpeg4: {
-            int al1 = al*35/100;
-            int al2 = al*45/100;
-            int al3 = al-al1-al2;
+            int64_t al1 = al*35/100;
+            int64_t al2 = al*45/100;
+            int64_t al3 = al-al1-al2;
             fti[n++] = (fti_tt){                            FLAG_SIZE_MSB,    1,      i, al1,    0,   al1 }; m+=al1-1;
             fti[n++] = (fti_tt){                            FLAG_SIZE_MSB,    2,      i, al2,    0,   al2 }; m+=al2-1;
             fti[n++] = (fti_tt){                            FLAG_SIZE_MSB,   -1,      i, al3,    0,   al3 }; m+=al3-1;
             break;
         }
         case e_consume_h264: {
-            int al1 = al*35/100;
-            int al2 = al*35/100;
-            int al3 = al*20/100;
-            int al4 = al-al1-al2-al3;
+            int64_t al1 = al*35/100;
+            int64_t al2 = al*35/100;
+            int64_t al3 = al*20/100;
+            int64_t al4 = al-al1-al2-al3;
             fti[n++] = (fti_tt){                            FLAG_SIZE_MSB,    1,      i, al1,    0,   al1 }; m+=al1-1;
             fti[n++] = (fti_tt){                            FLAG_SIZE_MSB,    2,      i, al2,    0,   al2 }; m+=al2-1;
             fti[n++] = (fti_tt){                            FLAG_SIZE_MSB,   -1,      i, al3,    0,   al3 }; m+=al3-1;
@@ -113,8 +113,8 @@ void nut_framecode_generate(const nut_stream_header_tt s[], nut_frame_table_inpu
             fti[n++] = (fti_tt){                            FLAG_SIZE_MSB,    1,      i,  al,    0,    al }; m+=al-1;
             break;
         case e_consume_vorbis: {
-            int al1 = al*70/100;
-            int al2 = al-al1;
+            int64_t al1 = al*70/100;
+            int64_t al2 = al-al1;
             al1 /= 2; al2 /= 2;
             fti[n++] = (fti_tt){                             NUT_FLAG_KEY,   16, i,240+al1,240-al1, al1*2 }; m+=al1*2-1;
             fti[n++] = (fti_tt){                             NUT_FLAG_KEY,    2, i, 65+al2, 65-al2, al2*2 }; m+=al2*2-1;

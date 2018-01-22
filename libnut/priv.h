@@ -46,23 +46,23 @@
 
 typedef struct {
     nut_input_stream_tt isc;
-    int is_mem;
+    int64_t is_mem;
     uint8_t * buf;
     uint8_t * buf_ptr;
-    int write_len; // allocated memory
-    int read_len;  // data in memory
-    off_t file_pos;
-    off_t filesize;
+    int64_t write_len; // allocated memory
+    int64_t read_len;  // data in memory
+    int64_t file_pos;
+    int64_t filesize;
     nut_alloc_tt * alloc;
 } input_buffer_tt;
 
 typedef struct {
     nut_output_stream_tt osc;
-        int is_mem;
+    int64_t is_mem;
     uint8_t * buf;
     uint8_t * buf_ptr;
-    int write_len; // allocated memory
-    off_t file_pos;
+    int64_t write_len; // allocated memory
+    int64_t file_pos;
     nut_alloc_tt * alloc;
 } output_buffer_tt;
 
@@ -76,11 +76,11 @@ typedef struct {
 } frame_table_tt;
 
 typedef struct {
-    off_t pos;
+    int64_t pos;
     uint64_t pts; // coded in '% timebase_count'
-    int back_ptr:30;
-    unsigned int seen_next:1;
-    unsigned int pts_valid:1;
+    int64_t back_ptr:30;
+    uint64_t seen_next:1;
+    uint64_t pts_valid:1;
 } syncpoint_tt;
 
 typedef struct syncpoint_linked_s syncpoint_linked_tt;
@@ -91,12 +91,12 @@ struct syncpoint_linked_s {
 };
 
 typedef struct {
-    int len;
-    int alloc_len;
+    int64_t len;
+    int64_t alloc_len;
     syncpoint_tt * s;
     uint64_t * pts; // each elem is stream_count items, +1 to real pts, 0 means there is no key
     uint64_t * eor; // same as pts, is the pts of last eor in syncpoint region _IF_ eor is set by syncpoint.
-    int cached_pos;
+    int64_t cached_pos;
     syncpoint_linked_tt * linked; // entries are entered in reverse order for speed, points to END of list
 } syncpoint_list_tt;
 
@@ -107,20 +107,20 @@ typedef struct {
 } reorder_packet_tt;
 
 typedef struct {
-    int active;
+    int64_t active;
     uint64_t pts; // requested pts;
     uint64_t old_last_pts;
-    off_t good_key;
-    int pts_higher; // for active streams
+    int64_t good_key;
+    int64_t pts_higher; // for active streams
 } seek_state_tt;
 
 typedef struct {
     uint64_t last_key; // muxer.c, reset to 0 on every keyframe
     uint64_t last_pts;
     int64_t last_dts;
-    int msb_pts_shift;
-    int max_pts_distance;
-    int timebase_id;
+    int64_t msb_pts_shift;
+    int64_t max_pts_distance;
+    int64_t timebase_id;
     nut_stream_header_tt sh;
     int64_t * pts_cache;
     int64_t eor;
@@ -128,12 +128,12 @@ typedef struct {
     // reorder.c
     int64_t next_pts;
     reorder_packet_tt * packets;
-    int num_packets;
+    int64_t num_packets;
     int64_t * reorder_pts_cache;
     // debug stuff
-    int overhead;
-    int tot_size;
-    int total_frames;
+    int64_t overhead;
+    int64_t tot_size;
+    int64_t total_frames;
 } stream_context_tt;
 
 struct nut_context_s {
@@ -145,38 +145,38 @@ struct nut_context_s {
     output_buffer_tt * tmp_buffer;
     output_buffer_tt * tmp_buffer2;
 
-    int timebase_count;
+    int64_t timebase_count;
     nut_timebase_tt * tb;
 
-    int stream_count;
+    int64_t stream_count;
     stream_context_tt * sc;
 
-    int info_count;
+    int64_t info_count;
     nut_info_packet_tt * info;
 
-    int max_distance;
+    int64_t max_distance;
     frame_table_tt ft[256];
 
-    off_t last_syncpoint; // for checking corruption and putting syncpoints, also for back_ptr
-    off_t last_headers; // for header repetition and state for demuxer
-    int headers_written; // for muxer header repetition
+    int64_t last_syncpoint; // for checking corruption and putting syncpoints, also for back_ptr
+    int64_t last_headers; // for header repetition and state for demuxer
+    int64_t headers_written; // for muxer header repetition
 
-    off_t before_seek; // position before any seek mess
-    off_t seek_status;
-    off_t binary_guess;
+    int64_t before_seek; // position before any seek mess
+    int64_t seek_status;
+    int64_t binary_guess;
     double seek_time_pos;
 
     syncpoint_list_tt syncpoints;
     struct find_syncpoint_state_s {
-        int i, begin, seeked;
-        off_t pos;
+        int64_t i, begin, seeked;
+        int64_t pos;
     } find_syncpoint_state;
 
     // debug
-    int sync_overhead;
+    int64_t sync_overhead;
 };
 
-static inline uint32_t crc32(uint8_t * buf, int len){
+static inline uint32_t crc32(uint8_t * buf, int64_t len){
     static const uint32_t table[16] = {
         0x00000000, 0x04C11DB7, 0x09823B6E, 0x0D4326D9,
         0x130476DC, 0x17C56B6B, 0x1A864DB2, 0x1E475005,
@@ -200,13 +200,13 @@ static inline uint64_t convert_ts(uint64_t sn, nut_timebase_tt from, nut_timebas
     return (ln / d1 * sn + (ln%d1) * sn / d1) / d2;
 }
 
-static inline int compare_ts(uint64_t a, nut_timebase_tt at, uint64_t b, nut_timebase_tt bt) {
+static inline int64_t compare_ts(uint64_t a, nut_timebase_tt at, uint64_t b, nut_timebase_tt bt) {
     if (convert_ts(a, at, bt) < b) return -1;
     if (convert_ts(b, bt, at) < a) return  1;
     return 0;
 }
 
-static inline int64_t get_dts(int d, int64_t * pts_cache, int64_t pts) {
+static inline int64_t get_dts(int64_t d, int64_t * pts_cache, int64_t pts) {
     while (d--) {
         int64_t t = pts_cache[d];
         if (t < pts) {
@@ -217,14 +217,14 @@ static inline int64_t get_dts(int d, int64_t * pts_cache, int64_t pts) {
     return pts;
 }
 
-static inline int64_t peek_dts(int d, int64_t * pts_cache, int64_t pts) {
+static inline int64_t peek_dts(int64_t d, int64_t * pts_cache, int64_t pts) {
     while (d--) if (pts_cache[d] < pts) pts = pts_cache[d];
     return pts;
 }
 
-static inline int gcd(int a, int b) {
+static inline int64_t gcd(int64_t a, int64_t b) {
     while (b != 0) {
-        int t = b;
+        int64_t t = b;
         b = a % b;
         a = t;
     }
@@ -234,7 +234,7 @@ static inline int gcd(int a, int b) {
 #define bctello(bc) ((bc)->file_pos + ((bc)->buf_ptr - (bc)->buf))
 
 #define TO_PTS(prefix, pts) \
-    int prefix##_tb = (pts) % nut->timebase_count; \
+    int64_t prefix##_tb = (pts) % nut->timebase_count; \
     uint64_t prefix##_p = (pts) / nut->timebase_count;
 
 #define TO_DOUBLE(t, pts) ((double)(pts) / nut->tb[t].den * nut->tb[t].num)
